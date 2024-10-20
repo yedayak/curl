@@ -9,3 +9,4 @@ libtests.c
 libauthretry
 libntlmconnect
 libprereq
+chkhostname

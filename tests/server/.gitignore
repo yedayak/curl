@@ -11,3 +11,4 @@ tftpd
 socksd
 disabled
 mqttd
+fake_ntlm
