@@ -37,6 +37,7 @@
 #include "sendf.h"
 #include "vtls.h"
 #include "vtls_int.h"
+#include "keylog.h"
 #include "select.h"
 #include "strerror.h"
 #include "multiif.h"
@@ -521,6 +522,17 @@ add_ciphers:
   *selected_size = count;
 }
 
+static void
+cr_keylog_log_cb(struct rustls_str label,
+                 const uint8_t *client_random, size_t client_random_len,
+                 const uint8_t *secret, size_t secret_len)
+{
+  char clabel[KEYLOG_LABEL_MAXLEN];
+  DEBUGASSERT(client_random_len == CLIENT_RANDOM_SIZE);
+  curl_msnprintf(clabel, label.len + 1, "%.*s", (int)label.len, label.data);
+  Curl_tls_keylog_write(clabel, client_random, secret, secret_len);
+}
+
 static CURLcode
 cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
                 struct rustls_ssl_backend_data *const backend)
@@ -646,6 +658,17 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
 
   rustls_crypto_provider_builder_free(custom_provider_builder);
   rustls_crypto_provider_free(custom_provider);
+
+  Curl_tls_keylog_open();
+  result = rustls_client_config_builder_set_key_log(config_builder,
+                                                    cr_keylog_log_cb, NULL);
+  if(result != RUSTLS_RESULT_OK) {
+    rustls_error(result, errorbuf, sizeof(errorbuf), &errorlen);
+    failf(data, "rustls_client_config_builder_set_key_log: %.*s",
+          (int)errorlen, errorbuf);
+    rustls_client_config_builder_free(config_builder);
+    return map_error(result);
+  }
 
   if(connssl->alpn) {
     struct alpn_proto_buf proto;
