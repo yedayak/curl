@@ -528,6 +528,7 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
 {
   struct ssl_connect_data *connssl = cf->ctx;
   struct ssl_primary_config *conn_config = Curl_ssl_cf_get_primary_config(cf);
+  struct ssl_config_data *ssl_config = Curl_ssl_cf_get_config(cf, data);
   struct rustls_crypto_provider_builder *custom_provider_builder = NULL;
   const struct rustls_crypto_provider *custom_provider = NULL;
   struct rustls_connection *rconn = NULL;
@@ -740,6 +741,63 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
     rustls_client_config_builder_set_server_verifier(config_builder,
                                                      server_cert_verifier);
     rustls_server_cert_verifier_free(server_cert_verifier);
+  }
+
+  if(conn_config->clientcert && !ssl_config->key) {
+    failf(data, "rustls: must provide key with certificate %s",
+          conn_config->clientcert);
+    rustls_client_config_builder_free(config_builder);
+    return CURLE_SSL_CERTPROBLEM;
+  }
+  else if(!conn_config->clientcert && ssl_config->key) {
+    failf(data, "rustls: must provide certificate with key %s",
+          conn_config->clientcert);
+    rustls_client_config_builder_free(config_builder);
+    return CURLE_SSL_CERTPROBLEM;
+  }
+
+  if(conn_config->clientcert) {
+    struct dynbuf cert_contents;
+    struct dynbuf key_contents;
+    const struct rustls_certified_key *certified_key;
+    Curl_dyn_init(&cert_contents, SIZE_MAX);
+    if(!read_file_into(conn_config->clientcert, &cert_contents)) {
+      failf(data, "rustls: failed to read client certificate file: %s",
+            conn_config->clientcert);
+      Curl_dyn_free(&cert_contents);
+      rustls_client_config_builder_free(config_builder);
+      return CURLE_SSL_CERTPROBLEM;
+    }
+    Curl_dyn_init(&key_contents, SIZE_MAX);
+    if(!read_file_into(ssl_config->key, &key_contents)) {
+      failf(data, "rustls: failed to read key file: %s", ssl_config->key);
+      Curl_dyn_free(&cert_contents);
+      Curl_dyn_free(&key_contents);
+      rustls_client_config_builder_free(config_builder);
+      return CURLE_SSL_CERTPROBLEM;
+    }
+    result = rustls_certified_key_build(Curl_dyn_uptr(&cert_contents),
+                                      Curl_dyn_len(&cert_contents),
+                                      Curl_dyn_uptr(&key_contents),
+                                      Curl_dyn_len(&key_contents),
+                                      &certified_key);
+    Curl_dyn_free(&cert_contents);
+    Curl_dyn_free(&key_contents);
+    if(result != RUSTLS_RESULT_OK) {
+      failf(data, "rustls: failed to build certified key");
+      rustls_client_config_builder_free(config_builder);
+      return CURLE_SSL_CERTPROBLEM;
+    }
+    result = rustls_client_config_builder_set_certified_key(
+      config_builder, &certified_key, 1);
+    if(result != RUSTLS_RESULT_OK) {
+      rustls_error(result, errorbuf, sizeof(errorbuf), &errorlen);
+      failf(data, "rustls: failed to set certified key: %.*s", (int)errorlen,
+            errorbuf);
+      rustls_client_config_builder_free(config_builder);
+      return CURLE_SSL_CERTPROBLEM;
+    }
+    rustls_certified_key_free(certified_key);
   }
 
   result = rustls_client_config_builder_build(
