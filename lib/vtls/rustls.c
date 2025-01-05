@@ -776,6 +776,9 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
       rustls_client_config_builder_free(config_builder);
       return CURLE_SSL_CERTPROBLEM;
     }
+    /* FIXME: This doesn't verify that the key matches the certificate.
+     * That requires calling rustls_certified_key_keys_match, which should
+     * be exposed in rustls-0.15 */
     result = rustls_certified_key_build(Curl_dyn_uptr(&cert_contents),
                                       Curl_dyn_len(&cert_contents),
                                       Curl_dyn_uptr(&key_contents),
