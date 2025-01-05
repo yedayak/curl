@@ -744,14 +744,14 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
   }
 
   if(conn_config->clientcert && !ssl_config->key) {
-    failf(data, "rustls: must provide key with certificate %s",
+    failf(data, "rustls: must provide key with certificate '%s'",
           conn_config->clientcert);
     rustls_client_config_builder_free(config_builder);
     return CURLE_SSL_CERTPROBLEM;
   }
   else if(!conn_config->clientcert && ssl_config->key) {
-    failf(data, "rustls: must provide certificate with key %s",
-          conn_config->clientcert);
+    failf(data, "rustls: must provide certificate with key '%s'",
+          ssl_config->key);
     rustls_client_config_builder_free(config_builder);
     return CURLE_SSL_CERTPROBLEM;
   }
@@ -762,7 +762,7 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
     const struct rustls_certified_key *certified_key;
     Curl_dyn_init(&cert_contents, SIZE_MAX);
     if(!read_file_into(conn_config->clientcert, &cert_contents)) {
-      failf(data, "rustls: failed to read client certificate file: %s",
+      failf(data, "rustls: failed to read client certificate file '%s'",
             conn_config->clientcert);
       Curl_dyn_free(&cert_contents);
       rustls_client_config_builder_free(config_builder);
@@ -770,7 +770,7 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
     }
     Curl_dyn_init(&key_contents, SIZE_MAX);
     if(!read_file_into(ssl_config->key, &key_contents)) {
-      failf(data, "rustls: failed to read key file: %s", ssl_config->key);
+      failf(data, "rustls: failed to read key file '%s'", ssl_config->key);
       Curl_dyn_free(&cert_contents);
       Curl_dyn_free(&key_contents);
       rustls_client_config_builder_free(config_builder);
@@ -784,7 +784,9 @@ cr_init_backend(struct Curl_cfilter *cf, struct Curl_easy *data,
     Curl_dyn_free(&cert_contents);
     Curl_dyn_free(&key_contents);
     if(result != RUSTLS_RESULT_OK) {
-      failf(data, "rustls: failed to build certified key");
+      rustls_error(result, errorbuf, sizeof(errorbuf), &errorlen);
+      failf(data, "rustls: failed to build certified key: %.*s",
+            (int)errorlen, errorbuf);
       rustls_client_config_builder_free(config_builder);
       return CURLE_SSL_CERTPROBLEM;
     }
